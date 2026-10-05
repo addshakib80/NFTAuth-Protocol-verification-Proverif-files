@@ -110,6 +110,7 @@ This work is licensed under a [Creative Commons Attribution 4.0 International Li
 
 ## Contact
 
-**Mohammed Shakib Hossain**
+**Mohammed Shakib Hossain** , **Masum Alam Nahid**
 Department of Computer Science and Engineering, BRAC University, Dhaka, Bangladesh
-mohammed.shakib.hossain@g.bracu.ac.bd
+Cryptic Consultancy Limited, London, UK
+mohammed.shakib.hossain@g.bracu.ac.bd, masum@cryptic-consultancy.co.uk
