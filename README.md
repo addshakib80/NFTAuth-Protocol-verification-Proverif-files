@@ -84,7 +84,8 @@ ProVerif returns `true`, `false`, or `cannot be proven` for each query. All secr
 
 ## Related Repositories
 
-- [User study questionnaires](#) — SUS and custom UX survey instruments used for the usability evaluation.
+- [User study questionnaires](https://github.com/addshakib80/NFTAuth-user-study-questionnaires) — SUS and custom UX survey instruments used for the usability evaluation.
+
 
 ## Citation
 
