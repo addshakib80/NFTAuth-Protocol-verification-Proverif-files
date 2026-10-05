@@ -1,0 +1,113 @@
+(*        NFT-Metaverse Identity Registration Protocol  ***
+
+    M1 : U -> MV : [N1, registerReq]_HTTPS
+    M2 : MV -> U : [N1, registerRes]_HTTPS
+    M3 : U -> SC_Token : [N2, NFTMintReq]_RPC
+    M4 : SC_Token -> U : [N2, NFTMintRes]_RPC
+*)
+(* RPC = secure JSON-RPC format to send requests over HTTPS *)
+
+free c: channel.
+
+type host.
+type nonce.
+type pkey.
+type skey.
+
+(* Public key encryption *)
+fun pk(skey): pkey.
+fun encrypt(bitstring, pkey): bitstring.
+reduc forall x: bitstring, y: skey; decrypt(encrypt(x, pk(y)), y) = x.
+
+
+(* Signatures *)
+fun sign(bitstring, skey): bitstring.
+reduc forall m: bitstring, k: skey; checksign(sign(m, k), pk(k)) = m.
+
+(* Hash function *)
+fun hash(bitstring): bitstring.
+
+(* QmHash function *)
+fun qmhash(bitstring): bitstring.
+
+(* NFT constructor *)
+fun nftOf(bitstring): bitstring.
+
+(* Hosts *)
+free U, MV, SC_Token: host.
+
+(* Secrets *)
+free registerReq, registerRes, NFTMintReq, NFTMintRes: bitstring [private].
+
+(* Secrecy Query *)
+query attacker(registerReq);
+      attacker(registerRes);
+      attacker(NFTMintRes).
+
+(* Events for verification *)
+event U_BeginRegister(nonce, bitstring).
+event MV_IssueSignedCreds(nonce, bitstring).
+event U_EndRegister(nonce, bitstring).
+event U_BeginMint(nonce, bitstring).
+event SCToken_Minted(nonce, bitstring).
+event U_EndMint(nonce, bitstring).
+
+(* query  *)
+query n1: nonce, registerRes: bitstring; event(U_EndRegister(n1, registerRes)) ==> event(MV_IssueSignedCreds(n1, registerRes)).
+query n2: nonce, NFTMintRes: bitstring; inj-event(U_EndMint(n2, NFTMintRes)) ==> inj-event(SCToken_Minted(n2, NFTMintRes)).
+query n1, n2: nonce, registerRes, NFTMintRes: bitstring; event(SCToken_Minted(n2, NFTMintRes)) ==> event(MV_IssueSignedCreds(n1, registerRes)).
+
+
+let processU(skU: skey, pkMV: pkey, pkSC_Token: pkey) = 
+    let pkU = pk(skU) in
+    
+    (* M1: U -> MV : [N1, registerReq]_HTTPS *)
+    new N1: nonce;
+    event U_BeginRegister(N1, registerReq);
+    out(c, encrypt((N1, registerReq), pkMV));
+    
+    (* M2: MV -> U : [N1, registerRes]_HTTPS *)
+    in (c, m2: bitstring);
+    let (=N1, registerRes: bitstring) = decrypt(m2, skU) in
+    event U_EndRegister(N1, registerRes);
+    
+    (* M3: U -> SC_Token : [N2, NFTMintReq]_HTTPS *)
+    new N2: nonce;
+    event U_BeginMint(N2, NFTMintReq);
+    out(c, encrypt((N2, NFTMintReq), pkSC_Token));
+    
+    (* M4: SC_Token -> U : [N2, NFTMintRes]_HTTPS *)
+    in (c, m4: bitstring);
+    let (=N2, NFTMintRes: bitstring) = decrypt(m4, skU) in
+    event U_EndMint(N2, NFTMintRes).
+
+
+let processMV(skMV: skey, pkU: pkey) =
+    (* Receive M1, produce M2 *)
+    in (c, m1: bitstring);
+    let (n1: nonce, =registerReq) = decrypt(m1, skMV) in
+    event MV_IssueSignedCreds(n1, registerRes);
+    out(c, encrypt((n1, registerRes), pkU)).
+
+let processSC_Token(skSC_Token: skey, pkU: pkey, pkMV: pkey) =
+    (* Receive M3, produce M4 *)
+    in (c, m3: bitstring);
+    let (n2: nonce, =NFTMintReq) = decrypt(m3, skSC_Token) in
+    (* Check that signedCreds is a signature by MV over creds 
+    let (unsignedCreds: bitstring) = checksign(signedCreds, pkMV) in
+    if (creds = unsignedCreds) then *)
+    event SCToken_Minted(n2, NFTMintRes);
+    out(c, encrypt((n2, NFTMintRes), pkU)).
+
+process
+    new skU: skey;
+    new skMV: skey;
+    new skSC_Token: skey;
+    let pkU = pk(skU) in out(c, pkU);
+    let pkMV = pk(skMV) in out(c, pkMV);
+    let pkSC_Token = pk(skSC_Token) in out(c, pkSC_Token);
+
+    ( (!processU(skU, pkMV, pkSC_Token))
+    | (!processMV(skMV, pkU))
+    | (!processSC_Token(skSC_Token, pkU, pkMV)) )
+

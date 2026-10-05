@@ -1,0 +1,159 @@
+(*       NFT-Metaverse Identity Authentication Protocol 
+
+    M1 : U -> MV : [N1, serviceReq]_HTTPS
+    M2 : MV -> U : [N2, WalletAddressReq]_HTTPS
+    M3 : U -> MV : [N2, WalletAdressRes]_HTTPS
+    M4 : MV -> SC_Token : [N3, NFTReq]_RPC
+    M5 : SC_Token -> MV : [N3, NFTRes]_RPC
+    M6 : MV -> U : [N5, SignatureReq]_HTTPS
+    M7 : U -> MV : [N5, SignatureRes]_HTTPS
+    M8 : MV -> SC_Token : [N6, NFTMetadataReq]_RPC
+    M9 : SC_Token -> MV : [N6, NFTMetadataRes]_RPC
+    M10 : MV -> U : [N1, serviceRes]_HTTPS
+*)
+(* RPC = secure JSON-RPC format to send requests over HTTPS *)
+
+free c: channel.
+
+type host.
+type nonce.
+type pkey.
+type skey.
+
+(* Public key encryption *)
+fun pk(skey): pkey.
+fun encrypt(bitstring, pkey): bitstring.
+reduc forall x: bitstring, y: skey; decrypt(encrypt(x, pk(y)), y) = x.
+
+(* Signatures *)
+fun sign(bitstring, skey): bitstring.
+reduc forall m: bitstring, k: skey; checksign(sign(m, k), pk(k)) = m.
+
+(* Hash function *)
+fun hash(bitstring): bitstring.
+
+(* QmHash function *)
+fun qmhash(bitstring): bitstring.
+
+(* Hosts *)
+free U, MV, SC_Token: host.
+
+(* Secrets *)
+free serviceReq, serviceRes, WalletAddressReq, WalletAdressRes: bitstring[private].
+free NFTReq, NFTRes: bitstring[private].
+free SignatureReq, SignatureRes, NFTMetadataReq, NFTMetadataRes: bitstring[private].
+
+
+(* Secrecy Queries *)
+query attacker(WalletAdressRes);
+      attacker(NFTRes);
+      attacker(SignatureRes);
+      attacker(NFTMetadataRes);
+      attacker(serviceRes).
+
+(* Events for verification *)
+event U_BeginService(nonce, bitstring).
+event MV_AskedWalletAddr(nonce, bitstring).
+event U_SentWalletAddrRes(nonce, bitstring).
+event MV_RequestedNFTs(nonce, bitstring).
+event SCToken_SentNFTs(nonce, bitstring).
+event MV_AskedSignature(nonce, bitstring).
+event U_SentSignature(nonce, bitstring).
+event MV_RequestedMetadata(nonce, bitstring).
+event SCToken_SentMetadata(nonce, bitstring).
+event MV_CompletedService(nonce, bitstring).
+
+(* Correspondence queries for authentication *)
+query n1: nonce, serviceReq, serviceRes: bitstring ; inj-event(MV_CompletedService(n1, serviceRes)) ==> inj-event(U_BeginService(n1, serviceReq)).
+query n2: nonce, WalletAddressReq, WalletAddressRes: bitstring ; event(U_SentWalletAddrRes(n2, WalletAddressRes)) ==> event(MV_AskedWalletAddr(n2, WalletAddressReq)).
+query n3: nonce, NFTReq, NFTRes: bitstring ; event(SCToken_SentNFTs(n3, NFTRes)) ==> event(MV_RequestedNFTs(n3, NFTReq)).
+query n5: nonce, SignatureReq, SignatureRes: bitstring ; event(U_SentSignature(n5, SignatureRes)) ==> event(MV_AskedSignature(n5, SignatureReq)).
+query n6: nonce, NFTMetadataReq, NFTMetadataRes: bitstring ; event(SCToken_SentMetadata(n6, NFTMetadataRes)) ==> event(MV_RequestedMetadata(n6, NFTMetadataReq)).
+
+let processU(skU: skey, pkMV: pkey) =
+    let pkU = pk(skU) in
+    
+    (* M1: U -> MV : [N1, serviceReq]_HTTPS *)
+    new N1: nonce;  
+    out(c, encrypt((N1, serviceReq), pkMV));
+    
+    (* M2: MV -> U : [N2, WalletAddressReq]_HTTPS *)
+    in (c, m2: bitstring);
+    let (N2: nonce, =WalletAddressReq) = decrypt(m2, skU) in
+    
+    (* M3: U -> MV : [N2, WalletAdressRes]_HTTPS *)
+    event U_SentWalletAddrRes(N2, WalletAdressRes);
+    out(c, encrypt((N2, WalletAdressRes), pkMV));
+    
+    (* M6: MV -> U : [N5, SignatureReq]_HTTPS *)
+    in (c, m6: bitstring);
+    let (N5: nonce, =SignatureReq) = decrypt(m6, skU) in
+    
+    (* M7: U -> MV : [N5, SignatureRes]_HTTPS *)
+    event U_SentSignature(N5, SignatureRes);
+    out(c, encrypt((N5, SignatureRes), pkMV));
+    
+    (* M10: MV -> U : [N1, serviceRes]_HTTPS *)
+    in (c, m10: bitstring);
+    let (=N1, =serviceRes) = decrypt(m10, skU) in
+    event MV_CompletedService(N1, serviceRes).
+
+let processMV(skMV: skey, pkU: pkey, pkSC_Token: pkey) =
+    (* Receive M1, produce M2 *)
+    in (c, m1: bitstring);
+    let (N1: nonce, =serviceReq) = decrypt(m1, skMV) in
+    event U_BeginService(N1, serviceReq);
+    new N2: nonce;
+    event MV_AskedWalletAddr(N2, WalletAddressReq);
+    out(c, encrypt((N2, WalletAddressReq), pkU));
+    
+    (* Receive M3, produce M4 *)
+    in (c, m3: bitstring);
+    let (N2: nonce, =WalletAdressRes) = decrypt(m3, skMV) in
+    new N3: nonce;
+    event MV_RequestedNFTs(N3, NFTReq);
+    out(c, encrypt((N3, NFTReq), pkSC_Token));
+    
+    (* Receive M5, produce M6 *)
+    in (c, m5: bitstring);
+    let (N3: nonce, =NFTRes) = decrypt(m5, skMV) in
+    new N5: nonce;
+    event MV_AskedSignature(N5, SignatureReq);
+    out(c, encrypt((N5, SignatureReq), pkU));
+    
+    (* Receive M7, produce M8 *)
+    in (c, m7: bitstring);
+    let (N5: nonce, =SignatureRes) = decrypt(m7, skMV) in
+    new N6: nonce;
+    event MV_RequestedMetadata(N6, NFTMetadataReq);
+    out(c, encrypt((N6, NFTMetadataReq), pkSC_Token));
+    
+    (* Receive M9, produce M10 *)
+    in (c, m11: bitstring);
+    let (N6: nonce, =NFTMetadataRes) = decrypt(m11, skMV) in
+    out(c, encrypt((N1, serviceRes), pkU)).
+
+let processSC_Token(skSC_Token: skey, pkMV: pkey) =
+    (* Receive M4, produce M5 *)
+    in (c, m4: bitstring);
+    let (N3: nonce, =NFTReq) = decrypt(m4, skSC_Token) in
+    event SCToken_SentNFTs(N3, NFTRes);
+    out(c, encrypt((N3, NFTRes), pkMV));
+    
+    (* Receive M8, produce M9 *)
+    in (c, m10: bitstring);
+    let (N6: nonce, =NFTMetadataReq) = decrypt(m10, skSC_Token) in
+    event SCToken_SentMetadata(N6, NFTMetadataRes);
+    out(c, encrypt((N6, NFTMetadataRes), pkMV)).
+
+process
+    new skU: skey;
+    new skMV: skey;
+    new skSC_Token: skey;
+    let pkU = pk(skU) in out(c, pkU);
+    let pkMV = pk(skMV) in out(c, pkMV);
+    let pkSC_Token = pk(skSC_Token) in out(c, pkSC_Token);
+
+    ( (!processU(skU, pkMV))
+    | (!processMV(skMV, pkU, pkSC_Token))
+    | (!processSC_Token(skSC_Token, pkMV)) )
